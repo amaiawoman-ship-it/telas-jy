@@ -1655,6 +1655,10 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
 (function(){
   if (navigator.storage && navigator.storage.persist){ try { navigator.storage.persist(); } catch(e){} }
   if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)){
+    var teniaControl = !!navigator.serviceWorker.controller, recargado = false;
+    navigator.serviceWorker.addEventListener("controllerchange", function(){
+      if (teniaControl && !recargado){ recargado = true; location.reload(); }
+    });
     window.addEventListener("load", function(){ navigator.serviceWorker.register("sw.js").catch(function(){}); });
   }
 })();
