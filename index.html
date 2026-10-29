@@ -159,6 +159,17 @@ select + input[data-f="dis"]{margin-top:8px}
 .lrow .lmain{flex:1;min-width:0}
 .lrow .lt{font-weight:700;font-size:15px;white-space:nowrap;font-variant-numeric:tabular-nums}
 .dbltag{font-size:12px;padding:2px 9px;border-radius:999px;background:var(--rose-bg);color:var(--rose)}
+.payrow{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 10px}
+.payrow input{flex:1;min-width:130px}
+.paylog{margin:-2px 0 8px}
+.cutpill{font:inherit;font-size:12px;padding:3px 10px;border-radius:999px;border:1px solid var(--line);background:transparent;color:var(--muted);cursor:pointer}
+.cutpill.on{background:var(--sage-bg);color:var(--sage);border-color:transparent;font-weight:600}
+.cutrow .cl{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.cutrow .btn{padding:6px 11px;font-size:13px}
+.cutrow .fr{color:var(--rose);font-size:13px;font-weight:600}
+.cutrow.done b{text-decoration:line-through;opacity:.5}
+.cutrow.done span{opacity:.6}
+.cutgrp .ch .btn{padding:6px 11px;font-size:12px}
 .empty{text-align:center;color:var(--muted);padding:30px 10px}
 .note{font-size:13px;color:var(--muted);margin-top:8px}
 .hint{font-size:12px;color:var(--gold);margin-top:5px}
@@ -182,12 +193,12 @@ select + input[data-f="dis"]{margin-top:8px}
     <div class="hero">
       <div class="k">Saldo por cobrar</div>
       <div class="v" id="sSal">0.00</div>
-      <div class="u">bolivianos en pedidos activos</div>
+      <div class="u">bolivianos pendientes de cobro</div>
     </div>
     <div class="minors">
       <div><div class="v" id="sVen">0.00</div><div class="k">Total vendido (sin canceladas)</div></div>
       <div><div class="v" id="sAct">0</div><div class="k">Reservas activas</div></div>
-      <div><div class="v" id="sAde">0.00</div><div class="k">Adelantos (Bs)</div></div>
+      <div><div class="v" id="sAde">0.00</div><div class="k">Cobrado (Bs)</div></div>
       <div><div class="v" id="sYd">0.00</div><div class="k">Metros apartados</div></div>
     </div>
   </section>
@@ -742,8 +753,11 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
   function lineasDe(x){
     if (x.lineas && x.lineas.length) return x.lineas;
     var tro = (x.entrega === "Envío" && x.tropico === "Sí") ? EXTRA_TROPICO : 0;
-    return [{diseno: x.diseno, metros: metrosDe(x), precio: x.precio, doble: x.doble, total: (x.total || 0) - tro}];
+    return [{diseno: x.diseno, metros: metrosDe(x), precio: x.precio, doble: x.doble, total: (x.total || 0) - tro, cortado: !!x.cortado}];
   }
+  function pagosSum(x){ return (x.pagos || []).reduce(function(t, p){ return t + (p.monto || 0); }, 0); }
+  function pagadoDe(x){ return (x.adelanto || 0) + pagosSum(x); }
+  function saldoDe(x){ return Math.round(((x.total || 0) - pagadoDe(x)) * 100) / 100; }
   function calcLine(m, pre, dbl){
     var base = Math.round(m * pre * 100) / 100;
     var d = dbl === "Sí" ? EXTRA_DOBLE : 0;
@@ -795,7 +809,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
     Array.prototype.forEach.call($(segId).children, function(b){ b.classList.toggle("on", b.getAttribute("data-v") === val); });
   }
   var lines = [];
-  function newLine(pre){ return {dis: "", otro: false, med: "", pre: pre != null && pre !== "" ? String(pre) : "", dbl: "No"}; }
+  function newLine(pre){ return {dis: "", otro: false, med: "", pre: pre != null && pre !== "" ? String(pre) : "", dbl: "No", forro: "", cort: false, origM: null, origDis: ""}; }
   function defaultPre(){
     var prev = lines.length ? lines[lines.length - 1].pre : "";
     return prev || (lastPrice != null ? lastPrice : "");
@@ -824,8 +838,18 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
         '<div><label>Precio por metro (Bs)</label><input data-f="pre" data-i="' + i + '" type="number" inputmode="decimal" step="0.01" min="0" placeholder="550" value="' + esc(L.pre) + '"></div>' +
         '<div class="full"><label>Doble forro (+' + EXTRA_DOBLE + ' Bs)</label><div class="seg" data-f="dbl" data-i="' + i + '">' +
         '<button type="button" data-v="No" class="' + (L.dbl === "No" ? "on" : "") + '">No</button>' +
-        '<button type="button" data-v="Sí" class="' + (L.dbl === "Sí" ? "on" : "") + '">Sí</button></div></div></div></div>';
-    }).join("");
+        '<button type="button" data-v="Sí" class="' + (L.dbl === "Sí" ? "on" : "") + '">Sí</button></div></div>' +
+        (L.dbl === "Sí" ? '<div class="full"><label>Color del forro</label><input data-f="forro" data-i="' + i + '" type="text" list="forros" placeholder="Ej. negro" autocomplete="off" value="' + esc(L.forro || "") + '"></div>' : '') +
+        '</div></div>';
+    }).join("") + '<datalist id="forros">' + coloresForro().map(function(c){ return '<option value="' + esc(c) + '"></option>'; }).join("") + '</datalist>';
+  }
+  function coloresForro(){
+    var seen = {}, out = [];
+    items.forEach(function(x){ lineasDe(x).forEach(function(l){
+      var c = (l.forro || "").trim(), k = dkey(c);
+      if (c && !seen[k]){ seen[k] = true; out.push(c); }
+    }); });
+    return out.sort(function(a, b){ return a.localeCompare(b, "es"); });
   }
   function setSeg(segId, val){
     Array.prototype.forEach.call($(segId).children, function(b){ b.classList.toggle("on", b.getAttribute("data-v") === val); });
@@ -881,12 +905,13 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
       if (!(pre > 0)){ flash("Falta el precio por metro del diseño" + (n || "")); focusLine(i, "pre"); return; }
       var lc = calcLine(m, pre, L.dbl);
       sum += lc.total;
-      out.push({diseno: dis, metros: m, precio: pre, doble: L.dbl, total: lc.total});
+      out.push({diseno: dis, metros: m, precio: pre, doble: L.dbl, forro: L.dbl === "Sí" ? (L.forro || "").trim() : "", total: lc.total, cortado: !!L.cort && Math.abs(m - (L.origM || 0)) < 0.0001 && dkey(dis) === dkey(L.origDis)});
     }
     var t = (entrega === "Envío" && tropico === "Sí") ? EXTRA_TROPICO : 0;
     var total = sum + t;
-    if (ade > total){ flash("El adelanto no puede ser mayor al total"); return; }
     var prev = editingId ? items.find(function(x){ return x.id === editingId; }) : null;
+    var pagosPrev = prev ? pagosSum(prev) : 0;
+    if (ade + pagosPrev > total){ flash(pagosPrev ? "Lo pagado (adelanto y pagos) supera el total" : "El adelanto no puede ser mayor al total"); return; }
     var it = {
       id: editingId || newId(),
       fecha: $("fFecha").value || today(),
@@ -896,7 +921,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
       metros: out.reduce(function(a, l){ return a + l.metros; }, 0),
       precio: out[0].precio,
       doble: out.some(function(l){ return l.doble === "Sí"; }) ? "Sí" : "No",
-      total: total, adelanto: ade,
+      total: total, adelanto: ade, pagos: prev ? (prev.pagos || []) : [],
       entrega: entrega, tropico: entrega === "Envío" ? tropico : "No",
       estado: prev ? prev.estado : "Reservado",
       comprobante: prev ? !!prev.comprobante : false, listo: prev ? !!prev.listo : false,
@@ -922,7 +947,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
       var mm = Math.round((l.metros || 0) * 100) / 100;
       var dbl = l.doble === "Sí" ? "Sí" : "No";
       var pre = l.precio != null ? l.precio : (mm ? Math.round(((l.total || 0) - (dbl === "Sí" ? EXTRA_DOBLE : 0)) / mm * 100) / 100 : "");
-      return {dis: l.diseno || "", otro: false, med: mm ? String(mm) : "", pre: pre === "" ? "" : String(pre), dbl: dbl};
+      return {dis: l.diseno || "", otro: false, med: mm ? String(mm) : "", pre: pre === "" ? "" : String(pre), dbl: dbl, forro: l.forro || "", cort: !!l.cortado, origM: l.metros || 0, origDis: l.diseno || ""};
     });
     entrega = it.entrega; tropico = it.tropico || "No";
     renderLines();
@@ -934,6 +959,53 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
     window.scrollTo({top:0, behavior:"smooth"});
   }
 
+  function setCortadoMany(refs, val){
+    var por = {};
+    refs.forEach(function(r){ (por[r.id] = por[r.id] || {})[r.idx] = true; });
+    Object.keys(por).forEach(function(id){
+      var it = items.find(function(x){ return x.id === id; }); if (!it) return;
+      var copy = Object.assign({}, it);
+      if (it.lineas && it.lineas.length){
+        copy.lineas = it.lineas.map(function(l, i){ return por[id][i] ? Object.assign({}, l, {cortado: !!val}) : l; });
+      } else {
+        copy.cortado = !!val;
+      }
+      store.save(copy);
+    });
+  }
+  var payingId = null, payAmount = "", warnDeliver = null, warnTimer = null;
+  function addPago(id, monto){
+    var it = items.find(function(x){ return x.id === id; }); if (!it) return;
+    var sal = saldoDe(it);
+    monto = Math.round(monto * 100) / 100;
+    if (!(monto > 0)){ lflash("Escribe el monto del abono"); return; }
+    if (monto > sal + 0.001){ lflash("El abono no puede ser mayor al saldo (" + fmt(sal) + " Bs)"); return; }
+    var copy = Object.assign({}, it, {pagos: (it.pagos || []).concat([{fecha: today(), monto: monto}])});
+    var completo = monto >= sal - 0.001;
+    payingId = null; payAmount = "";
+    store.save(copy).then(function(){ lflash(completo ? "Pago completado" : "Abono guardado"); }, function(){ lflash("No se pudo guardar el pago. Intenta de nuevo."); });
+  }
+  function completarPago(id){
+    var it = items.find(function(x){ return x.id === id; }); if (!it) return;
+    var sal = saldoDe(it); if (sal > 0) addPago(id, sal);
+  }
+  function deshacerPago(id){
+    var it = items.find(function(x){ return x.id === id; }); if (!it || !(it.pagos && it.pagos.length)) return;
+    var ult = it.pagos[it.pagos.length - 1];
+    var copy = Object.assign({}, it, {pagos: it.pagos.slice(0, -1)});
+    store.save(copy).then(function(){ lflash("Se quitó el último pago (" + fmt(ult.monto) + " Bs)"); }, function(){ lflash("No se pudo deshacer el pago."); });
+  }
+  function entregar(id){
+    var it = items.find(function(x){ return x.id === id; }); if (!it) return;
+    if (saldoDe(it) > 0 && warnDeliver !== id){
+      warnDeliver = id; render();
+      clearTimeout(warnTimer);
+      warnTimer = setTimeout(function(){ warnDeliver = null; render(); }, 5000);
+      return;
+    }
+    warnDeliver = null;
+    setEstado(id, "Entregado");
+  }
   function setEstado(id, estado){
     var it = items.find(function(x){ return x.id === id; }); if (!it) return;
     var copy = Object.assign({}, it, {estado: estado});
@@ -1010,7 +1082,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
     migrated = true;
     setTimeout(function(){
       var todo = items.filter(function(x){
-        return x.estado === "Reservado" && x.total != null && Math.abs(x.total - Math.round(x.total)) > 0.0001 && (x.adelanto || 0) <= Math.round(x.total);
+        return x.estado === "Reservado" && x.total != null && Math.abs(x.total - Math.round(x.total)) > 0.0001 && pagadoDe(x) <= Math.round(x.total);
       });
       if (!todo.length) return;
       var n = 0, chain = Promise.resolve();
@@ -1058,13 +1130,17 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
   /* ---------- lista ---------- */
   function render(){
     var act = items.filter(function(x){ return x.estado === "Reservado"; });
-    var sal = 0, ade = 0, yd = 0;
-    act.forEach(function(x){ sal += (x.total||0) - (x.adelanto||0); ade += x.adelanto||0; yd += metrosDe(x); });
+    var yd = 0, sal = 0, cob = 0, ven = 0;
+    act.forEach(function(x){ yd += metrosDe(x); });
+    items.forEach(function(x){
+      if (x.estado === "Cancelado") return;
+      ven += x.total || 0; cob += pagadoDe(x);
+      var sv = saldoDe(x); if (sv > 0) sal += sv;
+    });
     $("sAct").textContent = act.length;
     $("sSal").textContent = fmt(sal);
-    $("sAde").textContent = fmt(ade);
+    $("sAde").textContent = fmt(cob);
     $("sYd").textContent = fmt(yd);
-    var ven = 0; items.forEach(function(x){ if (x.estado !== "Cancelado") ven += x.total || 0; });
     $("sVen").textContent = fmt(ven);
 
     var q = $("q").value.trim().toLowerCase();
@@ -1091,14 +1167,23 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
     order.sort(function(a,b){ return groups[b].last.localeCompare(groups[a].last); });
 
     function pedidoHtml(x){
-      var s = (x.total||0) - (x.adelanto||0);
+      var s = saldoDe(x);
       var done = x.estado !== "Reservado";
       var f = x.fecha ? x.fecha.split("-").reverse().join("/") : "";
       var ls = lineasDe(x);
-      var rowsHtml = ls.map(function(l){
+      var pgo = pagosSum(x);
+      var puedePagar = s > 0 && x.estado !== "Cancelado";
+      var pagosHtml = (x.pagos && x.pagos.length) ? '<div class="meta paylog">' + x.pagos.map(function(p){
+        return '<span>Pago ' + esc((p.fecha || "").split("-").reverse().join("/")) + ': ' + fmt(p.monto || 0) + ' Bs</span>';
+      }).join("") + '</div>' : '';
+      var payRow = payingId === x.id
+        ? '<div class="payrow"><input type="number" data-pay="' + esc(x.id) + '" inputmode="decimal" step="0.01" min="0" placeholder="Monto (máx. ' + fmt(s) + ')" value="' + esc(payAmount) + '"><button class="btn small" data-a="guardarabono" type="button">Guardar abono</button><button class="btn ghost small" data-a="cerrarabono" type="button">Cerrar</button></div>'
+        : '';
+      var rowsHtml = ls.map(function(l, idx){
         return '<div class="lrow"><div class="lmain"><div class="name">' + esc(l.diseno) + '</div>' +
           '<div class="meta"><span>' + fmt(l.metros||0) + ' m' + (l.precio ? ' a ' + fmt(l.precio) + ' Bs por metro' : '') + '</span>' +
-          (l.doble === "Sí" ? '<span class="dbltag">Doble forro</span>' : '') + '</div></div>' +
+          (l.doble === "Sí" ? '<span class="dbltag">Doble forro' + (l.forro ? ': ' + esc(l.forro) : '') + '</span>' : '') +
+          (x.estado === "Reservado" ? '<button class="cutpill' + (l.cortado ? ' on' : '') + '" data-a="tcut" data-i="' + idx + '" type="button">' + (l.cortado ? '✓ Cortado' : 'Por cortar') + '</button>' : '') + '</div></div>' +
           (ls.length > 1 ? '<div class="lt">' + fmt(l.total||0) + ' Bs</div>' : '') + '</div>';
       }).join("");
       return '<div class="item' + (done ? " done" : "") + '" data-id="' + esc(x.id) + '">' +
@@ -1110,25 +1195,31 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
         '<span class="tag ' + (x.comprobante ? 'ok' : 'no') + '">' + (x.comprobante ? '✓ Comprobante verificado' : 'Comprobante sin verificar') + '</span>' +
         '<span class="tag ' + (x.listo ? 'ok' : 'no') + '">' + (x.listo ? '✓ Listo para enviar' : 'Aún no está listo') + '</span></div>' +
         '<div class="money"><span>Total: ' + fmt(x.total||0) + '</span><span>Adelanto: ' + fmt(x.adelanto||0) + '</span>' +
+        (pgo > 0 ? '<span>Pagos: ' + fmt(pgo) + '</span>' : '') +
         '<span class="sal ' + (s > 0 ? "pend" : "paid") + '">Saldo: ' + fmt(s) + '</span></div>' +
+        pagosHtml + payRow +
         '<div class="acts">' +
+        (puedePagar ? '<button class="btn small" data-a="pagar" type="button">Completar pago (' + fmt(s) + ')</button><button class="btn ghost small" data-a="abonar" type="button">Abonar</button>' : '') +
         (x.estado === "Reservado"
           ? '<button class="btn ghost small" data-a="tcomp" type="button">' + (x.comprobante ? 'Quitar comprobante' : 'Verificar comprobante') + '</button>' +
             '<button class="btn ghost small" data-a="tlisto" type="button">' + (x.listo ? 'Quitar listo' : 'Marcar listo') + '</button>' +
-            '<button class="btn small" data-a="entregar" type="button">Marcar entregada</button>' +
+            (warnDeliver === x.id
+              ? '<button class="btn danger small" data-a="entregar" type="button">Aún debe ' + fmt(s) + ' Bs. Toca otra vez para entregar</button>'
+              : '<button class="btn small" data-a="entregar" type="button">Marcar entregada</button>') +
             '<button class="btn ghost small" data-a="editar" type="button">Editar</button>' +
             '<button class="btn ghost small" data-a="cancelar" type="button">Cancelar</button>'
           : '<button class="btn ghost small" data-a="reactivar" type="button">Reactivar</button>') +
+        (pgo > 0 ? '<button class="btn ghost small" data-a="deshacerpago" type="button">Deshacer último pago</button>' : '') +
         '<button class="btn ' + (pendingDel === x.id ? 'danger' : 'ghost') + ' small" data-a="borrar" type="button">' + (pendingDel === x.id ? '¿Seguro? Toca otra vez' : 'Eliminar') + '</button></div></div>';
     }
 
     box.innerHTML = order.map(function(k){
       var g = groups[k];
       g.list.sort(function(a,b){ return (b.creado||"").localeCompare(a.creado||""); });
-      var pend = 0, nAct = 0;
-      g.list.forEach(function(x){ if (x.estado === "Reservado"){ nAct++; pend += (x.total||0) - (x.adelanto||0); } });
+      var pend = 0;
+      g.list.forEach(function(x){ if (x.estado !== "Cancelado"){ var sv = saldoDe(x); if (sv > 0) pend += sv; } });
       var sub = '<span class="sub">' + g.list.length + (g.list.length === 1 ? " pedido" : " pedidos") + '</span>' +
-        (nAct && pend > 0 ? '<span class="deb">Debe ' + fmt(pend) + ' Bs</span>' : '');
+        (pend > 0 ? '<span class="deb">Debe ' + fmt(pend) + ' Bs</span>' : '');
       return '<div class="grp" data-cel="' + esc(g.cel) + '">' +
         '<div class="grp-head"><span class="cel">' + esc(g.cel) + '</span><span class="subs" style="display:flex;gap:4px 14px;flex-wrap:wrap">' + sub + '</span></div>' +
         g.list.map(pedidoHtml).join("") +
@@ -1146,12 +1237,25 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
     if (a === "editar") edit(id);
     else if (a === "tcomp") toggle(id, "comprobante");
     else if (a === "tlisto") toggle(id, "listo");
-    else if (a === "entregar") setEstado(id, "Entregado");
+    else if (a === "entregar") entregar(id);
+    else if (a === "tcut"){
+      var ii = +b.getAttribute("data-i"), itx = items.find(function(x){ return x.id === id; });
+      var cur = itx ? lineasDe(itx)[ii] : null;
+      if (cur) setCortadoMany([{id: id, idx: ii}], !cur.cortado);
+    }
+    else if (a === "pagar") completarPago(id);
+    else if (a === "abonar"){ payingId = payingId === id ? null : id; payAmount = ""; render(); if (payingId){ var inp = document.querySelector('#list input[data-pay]'); if (inp) inp.focus(); } }
+    else if (a === "guardarabono") addPago(id, num(payAmount));
+    else if (a === "cerrarabono"){ payingId = null; payAmount = ""; render(); }
+    else if (a === "deshacerpago") deshacerPago(id);
     else if (a === "cancelar") setEstado(id, "Cancelado");
     else if (a === "reactivar") setEstado(id, "Reservado");
     else if (a === "borrar") del(id);
   });
 
+  $("list").addEventListener("input", function(e){
+    if (e.target && e.target.getAttribute && e.target.getAttribute("data-pay")) payAmount = e.target.value;
+  });
   $("filters").addEventListener("click", function(e){
     var b = e.target.closest("button[data-f]"); if (!b) return;
     filter = b.getAttribute("data-f");
@@ -1172,6 +1276,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
     if (f === "dis"){ lines[+i].dis = e.target.value; recalc(); }
     else if (f === "med"){ lines[+i].med = e.target.value; recalc(); }
     else if (f === "pre"){ lines[+i].pre = e.target.value; recalc(); }
+    else if (f === "forro"){ lines[+i].forro = e.target.value; }
   });
   $("linesBox").addEventListener("change", function(e){
     if (!e.target.getAttribute || e.target.getAttribute("data-f") !== "sel") return;
@@ -1188,8 +1293,8 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
     var b = e.target.closest(".seg[data-f='dbl'] button"); if (!b) return;
     var i = +b.parentNode.getAttribute("data-i"); if (!lines[i]) return;
     lines[i].dbl = b.getAttribute("data-v");
-    Array.prototype.forEach.call(b.parentNode.children, function(x){ x.classList.toggle("on", x === b); });
-    recalc();
+    renderLines(); recalc();
+    if (lines[i].dbl === "Sí") focusLine(i, "forro");
   });
   $("q").addEventListener("input", render);
   $("btnAddDis").addEventListener("click", function(){ var v = $("newDis").value; $("newDis").value = ""; addDiseno(v); $("newDis").focus(); });
@@ -1205,13 +1310,13 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
 
   /* ---------- CSV ---------- */
   function toCsv(){
-    var head = ["Fecha","Celular","Diseño","Medida (m)","Precio por metro (Bs)","Total (Bs)","Adelanto (Bs)","Saldo pendiente (Bs)","Entrega","Trópico","Doble forro","Comprobante verificado","Listo para enviar","Estado"];
+    var head = ["Fecha","Celular","Diseño","Medida (m)","Precio por metro (Bs)","Total (Bs)","Adelanto (Bs)","Pagos posteriores (Bs)","Saldo pendiente (Bs)","Entrega","Trópico","Doble forro","Color de forro","Comprobante verificado","Listo para enviar","Cortado","Estado"];
     function q(v){ return '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"'; }
     var lines = [head.map(q).join(",")];
     items.slice().sort(function(a,b){ return (a.creado||"").localeCompare(b.creado||""); }).forEach(function(x){
-      var s = (x.total||0) - (x.adelanto||0);
+      var s = saldoDe(x);
       var ls = lineasDe(x);
-      lines.push([x.fecha, x.celular, ls.map(function(l){ return l.diseno + " (" + m2(l.metros||0) + " m)"; }).join("; "), Math.round(metrosDe(x)*100)/100, ls.map(function(l){ return l.precio == null ? "" : l.precio; }).join("; "), x.total, x.adelanto, s, x.entrega, x.tropico === "Sí" ? "Sí" : "No", x.doble, x.comprobante ? "Sí" : "No", x.listo ? "Sí" : "No", x.estado].map(q).join(","));
+      lines.push([x.fecha, x.celular, ls.map(function(l){ return l.diseno + " (" + m2(l.metros||0) + " m)"; }).join("; "), Math.round(metrosDe(x)*100)/100, ls.map(function(l){ return l.precio == null ? "" : l.precio; }).join("; "), x.total, x.adelanto, pagosSum(x), s, x.entrega, x.tropico === "Sí" ? "Sí" : "No", x.doble, ls.filter(function(l){ return l.doble === "Sí" && l.forro; }).map(function(l){ return l.forro; }).join("; "), x.comprobante ? "Sí" : "No", x.listo ? "Sí" : "No", ls.every(function(l){ return l.cortado; }) ? "Sí" : (ls.some(function(l){ return l.cortado; }) ? "Parcial" : "No"), x.estado].map(q).join(","));
     });
     return "\ufeff" + lines.join("\n");
   }
@@ -1231,35 +1336,41 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
   /* ---------- lista de cortes ---------- */
   function dkey(d){ return String(d == null ? "" : d).trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " "); }
   function m2(n){ return (Math.round(n * 100) / 100).toFixed(2); }
+  var cutShowDone = false;
   function cutData(){
     var base = items.filter(function(x){ return x.estado === "Reservado" && (cutScope !== "hoy" || x.fecha === today()); });
-    var map = {}, order = [];
+    var map = {}, order = [], nLines = 0;
     base.forEach(function(x){
-      lineasDe(x).forEach(function(l){
+      lineasDe(x).forEach(function(l, idx){
+        nLines++;
         var k = dkey(l.diseno) || "(sin diseño)";
-        if (!map[k]){ map[k] = {key: k, name: l.diseno || "(sin diseño)", cuts: []}; order.push(k); }
-        map[k].cuts.push({m: l.metros || 0, cel: x.celular});
+        if (!map[k]){ map[k] = {key: k, name: l.diseno || "(sin diseño)", cuts: [], done: []}; order.push(k); }
+        (l.cortado ? map[k].done : map[k].cuts).push({m: l.metros || 0, cel: x.celular, id: x.id, idx: idx, forro: l.doble === "Sí" ? (l.forro || "") : ""});
       });
     });
-    Object.keys(cutDes).forEach(function(k){ if (!map[k]) delete cutDes[k]; });
-    order.sort(function(a,b){ return map[a].name.localeCompare(map[b].name, "es"); });
-    var chosen = order.filter(function(k){ return cutDes[k]; });
-    var use = chosen.length ? chosen : order;
-    var groups = use.map(function(k){
-      var g = map[k]; g.cuts.sort(function(a,b){ return a.m - b.m; });
+    var keys = order.filter(function(k){ return map[k].cuts.length || (cutShowDone && map[k].done.length); });
+    Object.keys(cutDes).forEach(function(k){ if (keys.indexOf(k) < 0) delete cutDes[k]; });
+    keys.sort(function(a,b){ return map[a].name.localeCompare(map[b].name, "es"); });
+    var chosen = keys.filter(function(k){ return cutDes[k]; });
+    var use = chosen.length ? chosen : keys;
+    var shown = use.map(function(k){
+      var g = map[k];
+      g.cuts.sort(function(a,b){ return a.m - b.m; });
+      g.done.sort(function(a,b){ return a.m - b.m; });
       g.total = g.cuts.reduce(function(t,c){ return t + c.m; }, 0);
       return g;
     });
+    var groups = shown.filter(function(g){ return g.cuts.length; });
     var totalM = 0, totalN = 0;
     groups.forEach(function(g){ totalM += g.total; totalN += g.cuts.length; });
-    return {all: order.map(function(k){ return map[k]; }), groups: groups, nChosen: chosen.length, totalM: totalM, totalN: totalN, nBase: base.length};
+    return {all: keys.map(function(k){ return map[k]; }), shown: shown, groups: groups, nChosen: chosen.length, totalM: totalM, totalN: totalN, nLines: nLines};
   }
   function cutsWord(n){ return n + (n === 1 ? " corte" : " cortes"); }
   function scopeLabel(){ return cutScope === "hoy" ? "Solo pedidos de hoy" : "Todos los pedidos activos"; }
   function cutText(d){
     var lines = d.groups.map(function(g){
       return g.name + " (" + cutsWord(g.cuts.length) + ", " + m2(g.total) + " m)\n" +
-        g.cuts.map(function(c){ return m2(c.m) + (cutCel ? "  " + c.cel : ""); }).join("\n");
+        g.cuts.map(function(c){ return m2(c.m) + (c.forro ? "  forro " + c.forro : "") + (cutCel ? "  " + c.cel : ""); }).join("\n");
     });
     var t = lines.join("\n\n");
     if (d.groups.length) t += "\n\nTotal: " + m2(d.totalM) + " m en " + cutsWord(d.totalN);
@@ -1274,20 +1385,27 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
     var d = cutData();
     var chips = '<button type="button" class="dchip' + (d.nChosen ? "" : " on") + '" data-d="*">Todos</button>' +
       d.all.map(function(g){ return '<button type="button" class="dchip' + (cutDes[g.key] ? " on" : "") + '" data-d="' + esc(g.key) + '">' + esc(g.name) + ' (' + g.cuts.length + ')</button>'; }).join("");
-    var body = d.groups.length ? d.groups.map(function(g){
+    function row(c, done){
+      return '<div class="cutrow' + (done ? " done" : "") + '"><div class="cl"><b>' + m2(c.m) + ' m</b>' + (c.forro ? '<span class="fr">forro ' + esc(c.forro) + '</span>' : '') + (cutCel ? '<span>' + esc(c.cel) + '</span>' : '') + '</div>' +
+        '<button type="button" class="btn ' + (done ? "ghost" : "small") + '" data-c="cut" data-id="' + esc(c.id) + '" data-i="' + c.idx + '" data-v="' + (done ? "0" : "1") + '">' + (done ? "Deshacer" : "Cortado") + '</button></div>';
+    }
+    var body = d.shown.length ? d.shown.map(function(g){
       return '<div class="cutgrp"><div class="ch"><span class="cn">' + esc(g.name) + '</span><span class="cs">' +
-        cutsWord(g.cuts.length) + ", " + m2(g.total) + ' m en total</span></div>' +
-        g.cuts.map(function(c){ return '<div class="cutrow"><b>' + m2(c.m) + ' m</b>' + (cutCel ? '<span>' + esc(c.cel) + '</span>' : '') + '</div>'; }).join("") + '</div>';
-    }).join("") : '<div class="empty">No hay pedidos activos para cortar con este filtro.</div>';
-    var tot = d.groups.length ? '<div class="gtot"><span>' + (d.nChosen ? "Total de lo elegido" : "Total de todos los diseños") + '</span><b>' + m2(d.totalM) + ' m</b><span>' + cutsWord(d.totalN) + '</span></div>' : '';
+        (g.cuts.length ? cutsWord(g.cuts.length) + ", " + m2(g.total) + ' m por cortar' : 'Todo cortado') + '</span>' +
+        (g.cuts.length ? '<button type="button" class="btn small" data-c="cutgrp" data-k="' + esc(g.key) + '">Marcar todo cortado</button>' : '') + '</div>' +
+        g.cuts.map(function(c){ return row(c, false); }).join("") +
+        (cutShowDone ? g.done.map(function(c){ return row(c, true); }).join("") : "") + '</div>';
+    }).join("") : '<div class="empty">' + (d.nLines && !cutShowDone ? "Todo está cortado. No hay cortes pendientes." : "No hay pedidos activos para cortar con este filtro.") + '</div>';
+    var tot = d.groups.length ? '<div class="gtot"><span>' + (d.nChosen ? "Falta cortar de lo elegido" : "Falta cortar en total") + '</span><b>' + m2(d.totalM) + ' m</b><span>' + cutsWord(d.totalN) + '</span></div>' : '';
     var keepScroll = window.pageYOffset;
     box.innerHTML = '<h3>Lista de cortes</h3>' +
-      '<div class="info">Elige un diseño (o varios) y verás cuántos cortes tienes que hacer, con cada medida, y los metros en total. Solo cuenta pedidos activos.</div>' +
+      '<div class="info">Elige un diseño (o varios) y verás los cortes que faltan, con cada medida, y los metros en total. Cuando cortes uno, toca <b>Cortado</b> y sale de la lista para que no lo repitas.</div>' +
       '<label class="lbl">Pedidos de</label>' +
       '<div class="seg" id="cutScope"><button type="button" data-s="todos" class="' + (cutScope === "todos" ? "on" : "") + '">Todos los activos</button><button type="button" data-s="hoy" class="' + (cutScope === "hoy" ? "on" : "") + '">Solo hoy</button></div>' +
       '<label class="lbl">Diseño (toca para filtrar)</label>' +
       '<div class="chips">' + chips + '</div>' +
       '<label class="opt" style="margin:4px 0 6px"><input type="checkbox" id="cutCel"' + (cutCel ? " checked" : "") + '> Mostrar celular junto a cada medida</label>' +
+      '<label class="opt" style="margin:0 0 6px"><input type="checkbox" id="cutDone"' + (cutShowDone ? " checked" : "") + '> Mostrar también lo ya cortado</label>' +
       body + tot +
       '<textarea id="cutTxt" readonly aria-label="Texto de la lista">' + esc(cutText(d)) + '</textarea>' +
       '<div class="cmsg" id="cutMsg"></div>' +
@@ -1347,8 +1465,8 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
       w.need(20);
       w.line(g.name + " - " + cutsWord(g.cuts.length) + ", " + m2(g.total) + " m en total", {bold: true, size: 13, gap: 2});
       g.cuts.forEach(function(c){
-        w.line(m2(c.m) + " m", {x: 20, gap: 0.5, width: 60});
-        if (cutCel){ doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(90); doc.text(pdfClean(c.cel), 60, w.y - 2); doc.setTextColor(0); }
+        w.line(m2(c.m) + " m" + (c.forro ? "     forro " + c.forro : ""), {x: 20, gap: 0.5, width: 120});
+        if (cutCel){ doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(90); doc.text(pdfClean(c.cel), 150, w.y - 2); doc.setTextColor(0); }
       });
       w.y += 3; w.rule();
     });
@@ -1381,27 +1499,28 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
     order.forEach(function(k){
       var g = groups[k]; g.list.sort(function(a,b){ return (b.creado||"").localeCompare(a.creado||""); });
       var deb = 0;
-      g.list.forEach(function(x){ if (x.estado === "Reservado") deb += (x.total||0) - (x.adelanto||0); });
+      g.list.forEach(function(x){ if (x.estado !== "Cancelado"){ var sv = saldoDe(x); if (sv > 0) deb += sv; } });
       gSaldo += deb;
       w.need(30);
       w.line(g.cel + "  (" + g.list.length + (g.list.length === 1 ? " pedido" : " pedidos") + (deb > 0 ? ", debe " + fmt(deb) + " Bs" : "") + ")", {bold: true, size: 13, gap: 2});
       g.list.forEach(function(x){
-        var s = (x.total||0) - (x.adelanto||0);
+        var s = saldoDe(x);
         var extras = [x.entrega];
         if (x.entrega === "Envío" && x.tropico === "Sí") extras.push("tropico");
         extras.push(x.comprobante ? "comprobante verificado" : "comprobante sin verificar");
         extras.push(x.listo ? "listo para enviar" : "aun no esta listo");
+        if (x.estado === "Reservado") extras.push(lineasDe(x).every(function(l){ return l.cortado; }) ? "cortado" : "por cortar");
         extras.push(x.estado);
         var ls = lineasDe(x);
         ls.forEach(function(l){
-          w.line(l.diseno + " - " + fmt(l.metros||0) + " m" + (l.precio ? " a " + fmt(l.precio) + " Bs por metro" : "") + (l.doble === "Sí" ? ", doble forro" : "") + (ls.length > 1 ? "  =  " + fmt(l.total||0) + " Bs" : ""), {x: 20, width: 170, gap: 0.5});
+          w.line(l.diseno + " - " + fmt(l.metros||0) + " m" + (l.precio ? " a " + fmt(l.precio) + " Bs por metro" : "") + (l.doble === "Sí" ? ", doble forro" + (l.forro ? " " + l.forro : "") : "") + (ls.length > 1 ? "  =  " + fmt(l.total||0) + " Bs" : ""), {x: 20, width: 170, gap: 0.5});
         });
-        w.line("Total " + fmt(x.total||0) + "   Adelanto " + fmt(x.adelanto||0) + "   Saldo " + fmt(s) + " Bs", {x: 20, width: 170, gap: 0.5});
+        w.line("Total " + fmt(x.total||0) + "   Adelanto " + fmt(x.adelanto||0) + (pagosSum(x) > 0 ? "   Pagos " + fmt(pagosSum(x)) : "") + "   Saldo " + fmt(s) + " Bs", {x: 20, width: 170, gap: 0.5});
         w.line(extras.join(", "), {x: 20, width: 170, gray: true, size: 9.5, gap: 3});
       });
       w.rule();
     });
-    if (filter === "Reservado" || filter === "Todas") w.line("Saldo por cobrar en pedidos activos: " + fmt(gSaldo) + " Bs", {bold: true, size: 12});
+    if (filter === "Reservado" || filter === "Todas") w.line("Saldo por cobrar: " + fmt(gSaldo) + " Bs", {bold: true, size: 12});
     pdfSave(doc, "pedidos-telas-jy-" + today() + ".pdf", lflash);
   }
   $("btnPdf").addEventListener("click", pdfPedidos);
@@ -1425,6 +1544,12 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
     var c = b.getAttribute("data-c");
     if (c === "close"){ cutsOpen = false; renderCuts(); }
     else if (c === "pdf"){ pdfCuts(); }
+    else if (c === "cut"){ setCortadoMany([{id: b.getAttribute("data-id"), idx: +b.getAttribute("data-i")}], b.getAttribute("data-v") === "1"); }
+    else if (c === "cutgrp"){
+      var key = b.getAttribute("data-k");
+      var gr = cutData().shown.filter(function(g){ return g.key === key; })[0];
+      if (gr) setCortadoMany(gr.cuts.map(function(cc){ return {id: cc.id, idx: cc.idx}; }), true);
+    }
     else if (c === "copy"){
       var t = $("cutTxt").value;
       if (!t){ cflash("No hay nada que copiar"); return; }
@@ -1445,6 +1570,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
   });
   $("cutPanel").addEventListener("change", function(e){
     if (e.target && e.target.id === "cutCel"){ cutCel = e.target.checked; renderCuts(); }
+    else if (e.target && e.target.id === "cutDone"){ cutShowDone = e.target.checked; renderCuts(); }
   });
 
   /* ---------- copia de seguridad ---------- */
